@@ -162,7 +162,7 @@ struct clevo_wmi_model_t
 
 struct clevo_t
 {
-	struct clevo_wmi_model_t *model;
+	const struct clevo_wmi_model_t *model;
 	struct platform_device *pdev;
 	struct input_dev *idev;
 
@@ -559,8 +559,8 @@ _clevo_wmi_evaluate_method(u32 method, u32 arg, u32 *ret)
 		return -EIO;
 
 	obj = (union acpi_object *) output.pointer;
-	if (obj) {
-		if (obj->type == ACPI_TYPE_INTEGER)
+	if (likely(obj)) {
+		if (likely(obj->type == ACPI_TYPE_INTEGER))
 			tmp = (u32) obj->integer.value;
 		else if (obj->type == ACPI_TYPE_BUFFER)
 			memcpy(&tmp, obj->buffer.pointer, 4);
@@ -584,7 +584,7 @@ _clevo_wmi_notify(u32 value, void *context)
 
 	code = 0;
 	status = _clevo_wmi_evaluate_method(CLEVO_WMI_GCMD_EVNT, 0, &code);
-	if (status != AE_OK) {
+	if (unlikely(status != AE_OK)) {
 		pr_err("CLEVO WMI failed to receive code for event.\n");
 		return;
 	}
@@ -596,7 +596,7 @@ _clevo_wmi_notify(u32 value, void *context)
 enum led_brightness
 _clevo_led_get(struct led_classdev *led)
 {
-	if (!s_clevo.model || !s_clevo.model->led_get)
+	if (unlikely(!s_clevo.model || !s_clevo.model->led_get))
 		return LED_OFF;
 
 	return s_clevo.model->led_get(led);
@@ -605,7 +605,7 @@ _clevo_led_get(struct led_classdev *led)
 void
 _clevo_led_set(struct led_classdev *led, enum led_brightness value)
 {
-	if (!s_clevo.model || !s_clevo.model->led_set)
+	if (unlikely(!s_clevo.model || !s_clevo.model->led_set))
 		return;
 
 	s_clevo.model->led_set(led, value);
@@ -614,7 +614,7 @@ _clevo_led_set(struct led_classdev *led, enum led_brightness value)
 void
 _clevo_led_update(struct work_struct *work)
 {
-	if (!s_clevo.model || !s_clevo.model->led_update)
+	if (unlikely(!s_clevo.model || !s_clevo.model->led_update))
 		return;
 
 	s_clevo.model->led_update(work);
@@ -643,8 +643,8 @@ clevo_wmi_init(void)
 	/* setup input device */
 
 	s_clevo.idev = input_allocate_device();
-	if (!s_clevo.idev) {
-		errno = ENODEV;
+	if (IS_ERR_OR_NULL(s_clevo.idev)) {
+		errno = -ENODEV;
 		goto error;
 	}
 
@@ -659,12 +659,12 @@ clevo_wmi_init(void)
 	set_bit(KEY_RFKILL, s_clevo.idev->keybit);
 
 	errno = input_register_device(s_clevo.idev);
-	if (errno) goto error_idev;
+	if (unlikely(errno)) goto error_idev;
 
-	if (s_clevo.model && s_clevo.model->keymap) {
+	if (likely(s_clevo.model && s_clevo.model->keymap)) {
 		errno = sparse_keymap_setup(s_clevo.idev,
 		    s_clevo.model->keymap, NULL);
-		if (errno) goto error_idev;
+		if (unlikely(errno)) goto error_idev;
 	}
 
 	s_clevo.led_workqueue =
@@ -674,9 +674,9 @@ clevo_wmi_init(void)
 		goto error_keymap;
 	}
 
-	if (s_clevo.model->led_get &&
-	    s_clevo.model->led_set &&
-	    s_clevo.model->led_update) {
+	if (likely(s_clevo.model->led_get &&
+	           s_clevo.model->led_set &&
+	           s_clevo.model->led_update)) {
 		INIT_WORK(&s_clevo.airp_work, _clevo_led_update);
 
 		s_clevo.airp_led.name = "clevo:green:airplane_mode";
@@ -686,7 +686,7 @@ clevo_wmi_init(void)
 		s_clevo.airp_led.max_brightness = LED_FULL;
 
 		errno = led_classdev_register(&s_clevo.pdev->dev, &s_clevo.airp_led);
-		if (errno) goto error_led_workqueue;
+		if (unlikely(errno)) goto error_led_workqueue;
 	}
 
 	return 0;
@@ -706,19 +706,19 @@ error:
 	platform_driver_unregister(&s_clevo_platform_driver);
 	s_clevo.pdev = NULL;
 
-	return -errno;
+	return errno;
 }
 
 void
 clevo_wmi_exit(void)
 {
-	if (s_clevo.airp_led.dev)
+	if (likely(s_clevo.airp_led.dev))
 		led_classdev_unregister(&s_clevo.airp_led);
 
-	if (s_clevo.led_workqueue)
+	if (likely(s_clevo.led_workqueue))
 		destroy_workqueue(s_clevo.led_workqueue);
 
-	if (s_clevo.model && s_clevo.model->keymap)
+	if (likely(s_clevo.model && s_clevo.model->keymap))
 		sparse_keymap_free(s_clevo.idev);
 
 	input_unregister_device(s_clevo.idev);
@@ -753,7 +753,7 @@ clevo_wmi_probe(struct platform_device *pdev)
 
 	_clevo_wmi_evaluate_method(CLEVO_WMI_SCMD_HOTKEY_ENABLE, 0, NULL);
 
-	if (s_clevo.model && s_clevo.model->init)
+	if (likely(s_clevo.model && s_clevo.model->init))
 		return s_clevo.model->init(pdev);
 	
 	return 0;
@@ -764,7 +764,7 @@ clevo_wmi_remove(struct platform_device *pdev)
 {
 	wmi_remove_notify_handler(CLEVO_WMI_EVENT_GUID);
 
-	if (s_clevo.model && s_clevo.model->deinit)
+	if (likely(s_clevo.model && s_clevo.model->deinit))
 		s_clevo.model->deinit(pdev);
 
 	return 0;
@@ -775,7 +775,7 @@ clevo_wmi_resume(struct platform_device *pdev)
 {
 	_clevo_wmi_evaluate_method(CLEVO_WMI_SCMD_HOTKEY_ENABLE, 0, NULL);
 
-	if (s_clevo.model && s_clevo.model->resume)
+	if (likely(s_clevo.model && s_clevo.model->resume))
 		s_clevo.model->resume(pdev);
 
 	return 0;
