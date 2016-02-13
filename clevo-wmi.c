@@ -22,6 +22,7 @@
 #include <linux/dmi.h>
 #include <linux/input.h>
 #include <linux/input/sparse-keymap.h>
+#include <linux/leds.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 
@@ -111,6 +112,9 @@ static int _clevo_p65_init(struct platform_device *);
 static int _clevo_p65_resume(struct platform_device *);
 static ssize_t _clevo_p65_show_attr(struct device *, struct device_attribute *, char *);
 static ssize_t _clevo_p65_store_attr(struct device *, struct device_attribute *, const char *, size_t);
+static enum led_brightness _clevo_p65_led_get(struct led_classdev *);
+static void _clevo_p65_led_set(struct led_classdev *, enum led_brightness);
+static void _clevo_p65_led_update(struct work_struct *);
 
 /*
  * XXX: Model abstraction is still a work in progress.
@@ -118,7 +122,6 @@ static ssize_t _clevo_p65_store_attr(struct device *, struct device_attribute *,
  * I only have one CLEVO laptop so it's gonna take a while to sort out the
  * common bits.
  */
-static int __clevo_p65_airplane_led_get(bool *);
 static int __clevo_p65_airplane_led_set(bool);
 static int __clevo_p65_fan_control_set(u8);
 static int __clevo_p65_fan_speed_set(u8);
@@ -131,6 +134,9 @@ static int _clevo_wmi_bool_get(int, bool *);
 static int _clevo_wmi_bool_set(int, bool);
 static int _clevo_wmi_evaluate_method(u32, u32, u32 *);
 static void _clevo_wmi_notify(u32, void *);
+static enum led_brightness _clevo_led_get(struct led_classdev *);
+static void _clevo_led_set(struct led_classdev *, enum led_brightness);
+static void _clevo_led_update(struct work_struct *);
 
 static void __exit clevo_wmi_exit(void);
 static int __init_or_module clevo_wmi_init(void);
@@ -148,6 +154,10 @@ struct clevo_wmi_model_t
 	int (*deinit)(struct platform_device *pdev);
 	int (*init)(struct platform_device *pdev);
 	int (*resume)(struct platform_device *pdev);
+
+	enum led_brightness (*led_get)(struct led_classdev *);
+	void (*led_set)(struct led_classdev *, enum led_brightness);
+	void (*led_update)(struct work_struct *);
 };
 
 struct clevo_t
@@ -155,6 +165,11 @@ struct clevo_t
 	struct clevo_wmi_model_t *model;
 	struct platform_device *pdev;
 	struct input_dev *idev;
+
+	/* common leds */
+	struct workqueue_struct *led_workqueue;
+	struct led_classdev airp_led;
+	struct work_struct airp_work;
 };
 static struct clevo_t s_clevo;
 
@@ -179,6 +194,7 @@ DEVICE_ATTR(lcd_power, S_IWUSR, NULL, _clevo_p65_store_attr);
 struct clevo_p65_state_t
 {
 	int headphone_amp;
+	bool airplane_led;
 };
 
 static const struct key_entry s_clevo_p65_keymap[] = {
@@ -195,7 +211,11 @@ static struct clevo_wmi_model_t s_clevo_p65_model = {
 
 	.deinit = _clevo_p65_deinit,
 	.init = _clevo_p65_init,
-	.resume = _clevo_p65_resume
+	.resume = _clevo_p65_resume,
+
+	.led_set = _clevo_p65_led_set,
+	.led_get = _clevo_p65_led_get,
+	.led_update = _clevo_p65_led_update
 };
 
 static struct attribute * s_clevo_p65_attributes[] = {
@@ -256,9 +276,11 @@ _clevo_p65_init(struct platform_device *pdev)
 	struct clevo_p65_state_t *p65_state;
 
 	p65_state = kzalloc(sizeof(struct clevo_p65_state_t), GFP_KERNEL);
+	p65_state->airplane_led = false;
 	p65_state->headphone_amp = _P65_HEADPHONE_AMP_DEFAULT;
 	platform_set_drvdata(pdev, p65_state);
 
+	__clevo_p65_airplane_led_set(p65_state->airplane_led);
 	__clevo_p65_headphone_amp_set(p65_state->headphone_amp);
 
 	return sysfs_create_group(&pdev->dev.kobj, &s_clevo_attribute_group);
@@ -362,21 +384,40 @@ _clevo_p65_store_attr(struct device *dev,
 	return count;
 }
 
-int
-__clevo_p65_airplane_led_get(bool *on)
+enum led_brightness
+_clevo_p65_led_get(struct led_classdev *led)
 {
-	u32 state = 0;
+	struct clevo_p65_state_t *p65_state =
+	    platform_get_drvdata(s_clevo.pdev);
 
-	if (_clevo_wmi_evaluate_method(CLEVO_WMI_P65_SCMD_INDX,
-	    CLEVO_WMI_P65_OFFSET_AIRP, NULL))
-		return -EIO;
+	if (led == &s_clevo.airp_led)
+		return p65_state->airplane_led ? LED_FULL : LED_OFF;
 
-	if (_clevo_wmi_evaluate_method(CLEVO_WMI_P65_GCMD_EC, 0, &state))
-		return -EIO;
+	return LED_OFF;
+}
 
-	*on = state;
+void
+_clevo_p65_led_set(struct led_classdev *led, enum led_brightness value)
+{
+	struct clevo_p65_state_t *p65_state =
+	    platform_get_drvdata(s_clevo.pdev);
 
-	return 0;
+	if (led == &s_clevo.airp_led) {
+		p65_state->airplane_led = (value != LED_OFF);
+		queue_work(s_clevo.led_workqueue, &s_clevo.airp_work);
+	}
+}
+
+void
+_clevo_p65_led_update(struct work_struct *work)
+{
+	struct clevo_p65_state_t *p65_state =
+	    platform_get_drvdata(s_clevo.pdev);
+
+	if (work == &s_clevo.airp_work) {
+		/* inverted, rfkill trigger treats it as a WLAN-ON led. */
+		__clevo_p65_airplane_led_set(!p65_state->airplane_led);
+	}
 }
 
 int
@@ -552,6 +593,33 @@ _clevo_wmi_notify(u32 value, void *context)
 		pr_info("CLEVO WMI event '%x' went unhandled.\n", code);
 }
 
+enum led_brightness
+_clevo_led_get(struct led_classdev *led)
+{
+	if (!s_clevo.model || !s_clevo.model->led_get)
+		return LED_OFF;
+
+	return s_clevo.model->led_get(led);
+}
+
+void
+_clevo_led_set(struct led_classdev *led, enum led_brightness value)
+{
+	if (!s_clevo.model || !s_clevo.model->led_set)
+		return;
+
+	s_clevo.model->led_set(led, value);
+}
+
+void
+_clevo_led_update(struct work_struct *work)
+{
+	if (!s_clevo.model || !s_clevo.model->led_update)
+		return;
+
+	s_clevo.model->led_update(work);
+}
+
 /****************************************************************************/
 
 int
@@ -599,7 +667,35 @@ clevo_wmi_init(void)
 		if (errno) goto error_idev;
 	}
 
+	s_clevo.led_workqueue =
+	    create_singlethread_workqueue("led_workqueue");
+	if (IS_ERR_OR_NULL(s_clevo.led_workqueue)) {
+		errno = -ENOMEM;
+		goto error_keymap;
+	}
+
+	if (s_clevo.model->led_get &&
+	    s_clevo.model->led_set &&
+	    s_clevo.model->led_update) {
+		INIT_WORK(&s_clevo.airp_work, _clevo_led_update);
+
+		s_clevo.airp_led.name = "clevo:green:airplane_mode";
+		s_clevo.airp_led.brightness_get = _clevo_led_get;
+		s_clevo.airp_led.brightness_set = _clevo_led_set;
+		s_clevo.airp_led.default_trigger = "rfkill1";
+		s_clevo.airp_led.max_brightness = LED_FULL;
+
+		errno = led_classdev_register(&s_clevo.pdev->dev, &s_clevo.airp_led);
+		if (errno) goto error_led_workqueue;
+	}
+
 	return 0;
+
+error_led_workqueue:
+	destroy_workqueue(s_clevo.led_workqueue);
+
+error_keymap:
+	sparse_keymap_free(s_clevo.idev);
 
 error_idev:
 	input_free_device(s_clevo.idev);
@@ -616,6 +712,12 @@ error:
 void
 clevo_wmi_exit(void)
 {
+	if (s_clevo.airp_led.dev)
+		led_classdev_unregister(&s_clevo.airp_led);
+
+	if (s_clevo.led_workqueue)
+		destroy_workqueue(s_clevo.led_workqueue);
+
 	if (s_clevo.model && s_clevo.model->keymap)
 		sparse_keymap_free(s_clevo.idev);
 
