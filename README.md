@@ -40,6 +40,11 @@ Tested on my **P65** CLEVO P670RE (SAGER NP8677-S).
 
       /sys/devices/platform/clevo/webcam_power
 
+* Airplane Mode LED
+
+    - Exposed via sysfs.
+    - Automatically toggled by RFKill.
+
  DSDT
 ------
 
