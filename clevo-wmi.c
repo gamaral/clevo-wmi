@@ -202,6 +202,13 @@ static const struct key_entry s_clevo_p65_keymap[] = {
 	{ KE_KEY, 0x7B, { KEY_PROG2 } },  /* Fn+Backspace (Flexikey) */
 	{ KE_KEY, 0x7D, { KEY_RFKILL } }, /* Fn+2 */
 	{ KE_KEY, 0x7E, { KEY_RFKILL } }, /* Fn+2 */
+	{ KE_IGNORE, 0x70, },
+	{ KE_IGNORE, 0x8F, },
+	{ KE_IGNORE, 0xD7, },
+	{ KE_IGNORE, 0xF6, },
+	{ KE_IGNORE, 0xF7, },
+	{ KE_IGNORE, 0xFA, },
+	{ KE_IGNORE, 0xFB, },
 	{ KE_END, 0},
 };
 
