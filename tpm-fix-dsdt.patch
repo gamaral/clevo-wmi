@@ -1,0 +1,23 @@
+--- dsdt.dsl.org	2016-02-16 23:38:20.125009513 -0800
++++ dsdt.dsl	2016-02-17 09:21:52.278004851 -0800
+@@ -127,15 +127,15 @@
+     Name (TMF1, Zero)
+     Name (TMF2, Zero)
+     Name (TMF3, Zero)
+-    Name (TTPF, One)
+-    Name (DTPT, Zero)
+-    Name (TTDP, Zero)
++    Name (TTPF, Zero)
++    Name (DTPT, One)
++    Name (TTDP, One)
+     Name (TPMB, 0xFFFFFFFF)
+     Name (TPMC, 0xFFFFFFFF)
+     Name (TPMM, 0xFED40000)
+-    Name (FTPM, 0xFFFFFFFF)
++    Name (FTPM, 0xFED40040)
+     Name (AMDT, Zero)
+-    Name (TPMF, Zero)
++    Name (TPMF, One)
+     Name (SS1, One)
+     Name (SS2, Zero)
+     Name (SS3, One)
