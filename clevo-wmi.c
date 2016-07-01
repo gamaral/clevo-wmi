@@ -20,6 +20,7 @@
 
 #include <linux/acpi.h>
 #include <linux/dmi.h>
+#include <linux/i8042.h>
 #include <linux/input.h>
 #include <linux/input/sparse-keymap.h>
 #include <linux/leds.h>
@@ -61,10 +62,14 @@
 #define CLEVO_WMI_P65_SCMD_EC 0x75
 #define CLEVO_WMI_P65_SCMD_ACC 0x79
 
+#define CLEVO_I8042_SYNAPTIC_MODE 0x97
+
 /*
  * Workaround for P65, AIRP seems to flip the wrong bits.
  */
 #define CLEVO_WMI_P65_OFFSET_AIRP 0xD9
+
+#define CLEVO_UNUSED(x) (void)x
 
 MODULE_AUTHOR("Guillermo A. Amaral B. <g@maral.me>");
 MODULE_DESCRIPTION("CLEVO/Notebook Hotkey Driver.");
@@ -198,18 +203,20 @@ struct clevo_p65_state_t
 };
 
 static const struct key_entry s_clevo_p65_keymap[] = {
-	{ KE_KEY, 0x95, { KEY_PROG1 } },  /* Fn+ESC (Control Center) */
-	{ KE_KEY, 0x7B, { KEY_PROG2 } },  /* Fn+Backspace (Flexikey) */
-	{ KE_KEY, 0x7D, { KEY_RFKILL } }, /* Fn+2 */
-	{ KE_KEY, 0x7E, { KEY_RFKILL } }, /* Fn+2 */
-	{ KE_IGNORE, 0x70, },
-	{ KE_IGNORE, 0x8F, },
-	{ KE_IGNORE, 0xD7, },
-	{ KE_IGNORE, 0xF6, },
-	{ KE_IGNORE, 0xF7, },
-	{ KE_IGNORE, 0xFA, },
-	{ KE_IGNORE, 0xFB, },
-	{ KE_END, 0},
+	{ KE_KEY, 0x7B, { KEY_PROG2 } },          /* Fn+Backspace (Flexikey) */
+	{ KE_KEY, 0x7D, { KEY_ATTENDANT_OFF } },  /* Fn+2 */
+	{ KE_KEY, 0x7E, { KEY_ATTENDANT_ON } },   /* Fn+2 */
+	{ KE_KEY, 0x8A, { KEY_KBDILLUMTOGGLE } }, /* KB Backlight */
+	{ KE_KEY, 0x95, { KEY_PROG1 } },          /* Fn+ESC (Control Center) */
+	{ KE_KEY, 0xD7, { KEY_DISPLAYTOGGLE } },
+	{ KE_KEY, 0xFC, { KEY_TOUCHPAD_OFF } },
+	{ KE_KEY, 0xFD, { KEY_TOUCHPAD_ON } },
+	{ KE_IGNORE, 0x70, {} }, /* Fn+1 - FAN Override Off */
+	{ KE_IGNORE, 0x86, {} }, /* Fn+2 */
+	{ KE_IGNORE, 0x8F, {} }, /* Fn+1 - FAN Override On */
+	{ KE_IGNORE, 0xFA, {} }, /* Volume Up/Down */
+	{ KE_IGNORE, 0xFB, {} }, /* Mute */
+	{ KE_END, 0, {} },
 };
 
 static struct clevo_wmi_model_t s_clevo_p65_model = {
@@ -260,7 +267,7 @@ static struct dmi_system_id __initdata_or_module clevo_dmi_table[] = {
 		.callback = _clevo_platform_match,
 		.driver_data = &s_clevo_p65_model
 	},
-	{}
+	{ 0 }
 };
 MODULE_DEVICE_TABLE(dmi, clevo_dmi_table);
 
@@ -281,6 +288,7 @@ int
 _clevo_p65_init(struct platform_device *pdev)
 {
 	struct clevo_p65_state_t *p65_state;
+	bool tmpb;
 
 	p65_state = kzalloc(sizeof(struct clevo_p65_state_t), GFP_KERNEL);
 	p65_state->airplane_led = false;
@@ -289,6 +297,19 @@ _clevo_p65_init(struct platform_device *pdev)
 
 	__clevo_p65_airplane_led_set(p65_state->airplane_led);
 	__clevo_p65_headphone_amp_set(p65_state->headphone_amp);
+
+	/*
+	 * Workaround for webcam power setting mismatch.
+	 */
+	if (_clevo_wmi_bool_get(CLEVO_WMI_P65_GCMD_WEBCAM_POWER, &tmpb))
+	    _clevo_wmi_bool_set(CLEVO_WMI_P65_SCMD_WEBCAM_POWER, tmpb);
+
+	/*
+	 * Enable touchpad hotkey.
+	 */
+	i8042_lock_chip();
+	i8042_command(NULL, CLEVO_I8042_SYNAPTIC_MODE);
+	i8042_unlock_chip();
 
 	return sysfs_create_group(&pdev->dev.kobj, &s_clevo_attribute_group);
 }
@@ -586,6 +607,8 @@ _clevo_wmi_notify(u32 value, void *context)
 	acpi_status status;
 	u32 code;
 
+	CLEVO_UNUSED(context);
+
 	if (s_clevo.model && s_clevo.model->event_id != value)
 		return;
 
@@ -661,9 +684,14 @@ clevo_wmi_init(void)
 	s_clevo.idev->dev.parent = &platform_device->dev;
 
 	set_bit(EV_KEY, s_clevo.idev->evbit);
+	set_bit(KEY_ATTENDANT_OFF, s_clevo.idev->keybit);
+	set_bit(KEY_ATTENDANT_ON, s_clevo.idev->keybit);
+	set_bit(KEY_DISPLAYTOGGLE, s_clevo.idev->keybit);
+	set_bit(KEY_KBDILLUMTOGGLE, s_clevo.idev->keybit);
 	set_bit(KEY_PROG1, s_clevo.idev->keybit);
 	set_bit(KEY_PROG2, s_clevo.idev->keybit);
-	set_bit(KEY_RFKILL, s_clevo.idev->keybit);
+	set_bit(KEY_TOUCHPAD_OFF, s_clevo.idev->keybit);
+	set_bit(KEY_TOUCHPAD_ON, s_clevo.idev->keybit);
 
 	errno = input_register_device(s_clevo.idev);
 	if (unlikely(errno)) goto error_idev;

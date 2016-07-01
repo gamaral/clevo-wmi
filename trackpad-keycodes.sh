@@ -1,4 +1,4 @@
 #!/bin/sh
 
-setkeycodes e078 530
-setkeycodes e077 202
+setkeycodes e077 531
+setkeycodes e078 532
