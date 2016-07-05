@@ -216,13 +216,13 @@ struct clevo_p65_state_t
 
 static const struct key_entry s_clevo_p65_keymap[] = {
 	{ KE_KEY, 0x7B, { KEY_PROG2 } },          /* Fn+Backspace (Flexikey) */
-	{ KE_KEY, 0x7D, { KEY_ATTENDANT_OFF } },  /* Fn+2 */
-	{ KE_KEY, 0x7E, { KEY_ATTENDANT_ON } },   /* Fn+2 */
+	{ KE_KEY, 0x7D, { KEY_ATTENDANT_ON } },   /* Fn+2 */
+	{ KE_KEY, 0x7E, { KEY_ATTENDANT_OFF } },  /* Fn+2 */
 	{ KE_KEY, 0x8A, { KEY_KBDILLUMTOGGLE } }, /* KB Backlight */
 	{ KE_KEY, 0x95, { KEY_PROG1 } },          /* Fn+ESC (Control Center) */
 	{ KE_KEY, 0xD7, { KEY_DISPLAYTOGGLE } },
-	{ KE_KEY, 0xFC, { KEY_TOUCHPAD_OFF } },
-	{ KE_KEY, 0xFD, { KEY_TOUCHPAD_ON } },
+	{ KE_KEY, 0xFC, { KEY_TOUCHPAD_ON } },
+	{ KE_KEY, 0xFD, { KEY_TOUCHPAD_OFF } },
 	{ KE_IGNORE, 0x70, {} }, /* Fn+1 - FAN Override Off */
 	{ KE_IGNORE, 0x86, {} }, /* Fn+2 */
 	{ KE_IGNORE, 0x8F, {} }, /* Fn+1 - FAN Override On */
