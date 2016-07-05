@@ -14,7 +14,7 @@ Tested on my **P65** CLEVO P670RE (SAGER NP8677-S).
     - Fn + Backspace
     - Fn + ESC
     - Fn + F2
-    - Fn + F11 (Work in Progress)
+    - Fn + F11
 
 * Headphone Amplifier Support
 

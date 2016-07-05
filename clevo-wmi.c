@@ -19,12 +19,15 @@
  */
 
 #include <linux/acpi.h>
+#include <linux/delay.h>
 #include <linux/dmi.h>
 #include <linux/i8042.h>
 #include <linux/input.h>
 #include <linux/input/sparse-keymap.h>
+#include <linux/kthread.h>
 #include <linux/leds.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/platform_device.h>
 
 #define CLEVO_WMI_FILE "clevo"
@@ -68,6 +71,9 @@
  * Workaround for P65, AIRP seems to flip the wrong bits.
  */
 #define CLEVO_WMI_P65_OFFSET_AIRP 0xD9
+#define CLEVO_WMI_P65_OFFSET_RINF 0xDB
+
+#define CLEVO_WMI_P65_BIT_AIRP (1 << 6)
 
 #define CLEVO_UNUSED(x) (void)x
 
@@ -127,6 +133,7 @@ static void _clevo_p65_led_update(struct work_struct *);
  * I only have one CLEVO laptop so it's gonna take a while to sort out the
  * common bits.
  */
+static int __clevo_p65_airplane_hotkey_monitor(void *);
 static int __clevo_p65_airplane_led_set(bool);
 static int __clevo_p65_fan_control_set(u8);
 static int __clevo_p65_fan_speed_set(u8);
@@ -178,6 +185,10 @@ struct clevo_t
 };
 static struct clevo_t s_clevo;
 
+static DEFINE_MUTEX(s_clevo_inputdev_mutex);
+static DEFINE_MUTEX(s_clevo_wmi_mutex);
+static DEFINE_MUTEX(s_clevo_ec_mutex);
+
 /*
  * TODO: Replace show and store functions with wrapper that calls model
  * specific versions.
@@ -200,6 +211,7 @@ struct clevo_p65_state_t
 {
 	int headphone_amp;
 	bool airplane_led;
+	struct task_struct *task;
 };
 
 static const struct key_entry s_clevo_p65_keymap[] = {
@@ -278,6 +290,11 @@ _clevo_p65_deinit(struct platform_device *pdev)
 {
 	struct clevo_p65_state_t *p65_state = platform_get_drvdata(pdev);
 
+	if (likely(!IS_ERR_OR_NULL(p65_state->task))) {
+		kthread_stop(p65_state->task);
+		p65_state->task = NULL;
+	}
+
 	sysfs_remove_group(&pdev->dev.kobj, &s_clevo_attribute_group);
 
 	kfree(p65_state);
@@ -310,6 +327,16 @@ _clevo_p65_init(struct platform_device *pdev)
 	i8042_lock_chip();
 	i8042_command(NULL, CLEVO_I8042_SYNAPTIC_MODE);
 	i8042_unlock_chip();
+
+	p65_state->task =
+	    kthread_run(__clevo_p65_airplane_hotkey_monitor, NULL,
+	        "clevo_p65_airplane_hotkey_monitor");
+
+	if (unlikely(IS_ERR(p65_state->task))) {
+		p65_state->task = NULL;
+		pr_err("Failed to create airplane hotkey monitoring thread!\n");
+		return PTR_ERR(p65_state->task);
+	}
 
 	return sysfs_create_group(&pdev->dev.kobj, &s_clevo_attribute_group);
 }
@@ -449,6 +476,49 @@ _clevo_p65_led_update(struct work_struct *work)
 }
 
 int
+__clevo_p65_airplane_hotkey_monitor(void *data)
+{
+	u32 state = 0;
+
+	pr_info("Airplane-mode key monitoring started.\n");
+	do {
+		mutex_lock(&s_clevo_ec_mutex);
+
+		if (_clevo_wmi_evaluate_method(CLEVO_WMI_P65_SCMD_INDX,
+		    CLEVO_WMI_P65_OFFSET_RINF, NULL))
+			goto continue_sleep;
+
+		if(_clevo_wmi_evaluate_method(CLEVO_WMI_P65_GCMD_EC, 0, &state))
+			goto continue_sleep;
+
+		if (unlikely(state & CLEVO_WMI_P65_BIT_AIRP)) {
+			_clevo_wmi_evaluate_method(CLEVO_WMI_P65_SCMD_EC,
+			    state & ~CLEVO_WMI_P65_BIT_AIRP, NULL);
+
+			pr_info("Airplane-mode key flag is set.\n");
+
+			mutex_lock(&s_clevo_inputdev_mutex);
+
+			input_report_key(s_clevo.idev, KEY_RFKILL, 1);
+			input_sync(s_clevo.idev);
+
+			input_report_key(s_clevo.idev, KEY_RFKILL, 0);
+			input_sync(s_clevo.idev);
+
+			mutex_unlock(&s_clevo_inputdev_mutex);
+		}
+
+continue_sleep:
+		mutex_unlock(&s_clevo_ec_mutex);
+		msleep_interruptible(400);
+	} while (!kthread_should_stop());
+
+	pr_info("Airplane-mode key monitoring finished.\n");
+
+	return 0;
+}
+
+int
 __clevo_p65_airplane_led_set(bool on)
 {
 	u32 state = 0;
@@ -459,23 +529,33 @@ __clevo_p65_airplane_led_set(bool on)
 	 * LED, but it's pretty much pointless. */
 	_clevo_wmi_evaluate_method(CLEVO_WMI_P65_SCMD_AIRPLANE_LED, on ? 1 : 0, NULL);
 
+	mutex_lock(&s_clevo_ec_mutex);
+
 	/*
 	 * Update correct offset
 	 */
 	if (_clevo_wmi_evaluate_method(CLEVO_WMI_P65_SCMD_INDX,
 	    CLEVO_WMI_P65_OFFSET_AIRP, NULL))
-		return -EIO;
+		goto error;
 
 	if(_clevo_wmi_evaluate_method(CLEVO_WMI_P65_GCMD_EC, 0, &state))
-		return -EIO;
+		goto error;
 
-	if (on) state |= (1 << 6);
-	else state &= ~(1 << 6);
+	if (on) state |= CLEVO_WMI_P65_BIT_AIRP;
+	else state &= ~CLEVO_WMI_P65_BIT_AIRP;
 
 	if (_clevo_wmi_evaluate_method(CLEVO_WMI_P65_SCMD_EC, state, NULL))
-		return -EIO;
+		goto error;
+
+	mutex_unlock(&s_clevo_ec_mutex);
 
 	return 0;
+
+error:
+	mutex_unlock(&s_clevo_ec_mutex);
+
+	return -EIO;
+
 }
 
 int
@@ -581,8 +661,13 @@ _clevo_wmi_evaluate_method(u32 method, u32 arg, u32 *ret)
 	acpi_status status;
 	u32 tmp = 0;
 
+	mutex_lock(&s_clevo_wmi_mutex);
+
 	status = wmi_evaluate_method(CLEVO_WMI_METHOD_GUID, 1,
 	    method, &input, &output);
+
+	mutex_unlock(&s_clevo_wmi_mutex);
+
 	if (ACPI_FAILURE(status))
 		return -EIO;
 
@@ -619,8 +704,12 @@ _clevo_wmi_notify(u32 value, void *context)
 		return;
 	}
 
+	mutex_lock(&s_clevo_inputdev_mutex);
+
 	if (!sparse_keymap_report_event(s_clevo.idev, code, 1, 1))
 		pr_info("CLEVO WMI event '%x' went unhandled.\n", code);
+
+	mutex_unlock(&s_clevo_inputdev_mutex);
 }
 
 enum led_brightness
@@ -690,6 +779,7 @@ clevo_wmi_init(void)
 	set_bit(KEY_KBDILLUMTOGGLE, s_clevo.idev->keybit);
 	set_bit(KEY_PROG1, s_clevo.idev->keybit);
 	set_bit(KEY_PROG2, s_clevo.idev->keybit);
+	set_bit(KEY_RFKILL, s_clevo.idev->keybit);
 	set_bit(KEY_TOUCHPAD_OFF, s_clevo.idev->keybit);
 	set_bit(KEY_TOUCHPAD_ON, s_clevo.idev->keybit);
 
