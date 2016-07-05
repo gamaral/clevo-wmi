@@ -215,17 +215,18 @@ struct clevo_p65_state_t
 };
 
 static const struct key_entry s_clevo_p65_keymap[] = {
-	{ KE_KEY, 0x7B, { KEY_PROG2 } },          /* Fn+Backspace (Flexikey) */
-	{ KE_KEY, 0x7D, { KEY_ATTENDANT_ON } },   /* Fn+2 */
-	{ KE_KEY, 0x7E, { KEY_ATTENDANT_OFF } },  /* Fn+2 */
-	{ KE_KEY, 0x8A, { KEY_KBDILLUMTOGGLE } }, /* KB Backlight */
-	{ KE_KEY, 0x95, { KEY_PROG1 } },          /* Fn+ESC (Control Center) */
+	{ KE_KEY, 0x7B, { KEY_PROG2 } },            /* Fn+Backspace (Flexikey) */
+	{ KE_KEY, 0x7D, { KEY_ATTENDANT_TOGGLE } }, /* Fn+2 */
+	{ KE_KEY, 0x7E, { KEY_ATTENDANT_TOGGLE } }, /* Fn+2 */
+	{ KE_KEY, 0x8A, { KEY_KBDILLUMTOGGLE } },   /* KB Backlight */
+	{ KE_KEY, 0x95, { KEY_PROG1 } },            /* Fn+ESC (Control Center) */
 	{ KE_KEY, 0xD7, { KEY_DISPLAYTOGGLE } },
-	{ KE_KEY, 0xFC, { KEY_TOUCHPAD_ON } },
-	{ KE_KEY, 0xFD, { KEY_TOUCHPAD_OFF } },
+	{ KE_KEY, 0xFC, { KEY_TOUCHPAD_TOGGLE } },
+	{ KE_KEY, 0xFD, { KEY_TOUCHPAD_TOGGLE } },
 	{ KE_IGNORE, 0x70, {} }, /* Fn+1 - FAN Override Off */
 	{ KE_IGNORE, 0x86, {} }, /* Fn+2 */
 	{ KE_IGNORE, 0x8F, {} }, /* Fn+1 - FAN Override On */
+	{ KE_IGNORE, 0xC7, {} },
 	{ KE_IGNORE, 0xFA, {} }, /* Volume Up/Down */
 	{ KE_IGNORE, 0xFB, {} }, /* Mute */
 	{ KE_END, 0, {} },
@@ -773,15 +774,13 @@ clevo_wmi_init(void)
 	s_clevo.idev->dev.parent = &platform_device->dev;
 
 	set_bit(EV_KEY, s_clevo.idev->evbit);
-	set_bit(KEY_ATTENDANT_OFF, s_clevo.idev->keybit);
-	set_bit(KEY_ATTENDANT_ON, s_clevo.idev->keybit);
+	set_bit(KEY_ATTENDANT_TOGGLE, s_clevo.idev->keybit);
 	set_bit(KEY_DISPLAYTOGGLE, s_clevo.idev->keybit);
 	set_bit(KEY_KBDILLUMTOGGLE, s_clevo.idev->keybit);
 	set_bit(KEY_PROG1, s_clevo.idev->keybit);
 	set_bit(KEY_PROG2, s_clevo.idev->keybit);
 	set_bit(KEY_RFKILL, s_clevo.idev->keybit);
-	set_bit(KEY_TOUCHPAD_OFF, s_clevo.idev->keybit);
-	set_bit(KEY_TOUCHPAD_ON, s_clevo.idev->keybit);
+	set_bit(KEY_TOUCHPAD_TOGGLE, s_clevo.idev->keybit);
 
 	errno = input_register_device(s_clevo.idev);
 	if (unlikely(errno)) goto error_idev;
