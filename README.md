@@ -52,10 +52,10 @@ Tested on my **P65** CLEVO P670RE (SAGER NP8677-S).
         /dev/input/by-path/platform-clevo-event
 
     Since X11 doesn't see keycodes over 255, they won't be usable in keybinders
-    like *xbindkeys*.  You have two choices, use something like **evbind** or
+    like *xbindkeys*. You have two options, use something like **evbind** or
     change the keycodes returned by the driver.
 
-    I've also made evbind available under my GitHub account.
+    I've also made **evbind** available under my GitHub account.
 
  DSDT
 ------
