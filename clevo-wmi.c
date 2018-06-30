@@ -226,9 +226,14 @@ static const struct key_entry s_clevo_p65_keymap[] = {
 	{ KE_IGNORE, 0x70, {} }, /* Fn+1 - FAN Override Off */
 	{ KE_IGNORE, 0x86, {} }, /* Fn+2 */
 	{ KE_IGNORE, 0x8F, {} }, /* Fn+1 - FAN Override On */
+	{ KE_IGNORE, 0xCB, {} }, /* Screen-Lock Off - Enable Meta-Key */
+	{ KE_IGNORE, 0xCC, {} }, /* Screen-Lock On - Disable Meta-Key */
 	{ KE_IGNORE, 0xC7, {} },
+	{ KE_IGNORE, 0xC8, {} },
 	{ KE_IGNORE, 0xFA, {} }, /* Volume Up/Down */
 	{ KE_IGNORE, 0xFB, {} }, /* Mute */
+	{ KE_IGNORE, 0xF6, {} }, /* Webcam Disable */
+	{ KE_IGNORE, 0xF7, {} }, /* Webcam Enable */
 	{ KE_END, 0, {} },
 };
 
@@ -306,7 +311,7 @@ int
 _clevo_p65_init(struct platform_device *pdev)
 {
 	struct clevo_p65_state_t *p65_state;
-	bool tmpb;
+	bool tmpb = false;
 
 	p65_state = kzalloc(sizeof(struct clevo_p65_state_t), GFP_KERNEL);
 	p65_state->airplane_led = false;
@@ -511,7 +516,7 @@ __clevo_p65_airplane_hotkey_monitor(void *data)
 
 continue_sleep:
 		mutex_unlock(&s_clevo_ec_mutex);
-		msleep_interruptible(400);
+		msleep_interruptible(1000);
 	} while (!kthread_should_stop());
 
 	pr_info("Airplane-mode key monitoring finished.\n");
