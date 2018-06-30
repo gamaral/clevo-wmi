@@ -800,7 +800,11 @@ clevo_wmi_init(void)
 	    create_singlethread_workqueue("led_workqueue");
 	if (IS_ERR_OR_NULL(s_clevo.led_workqueue)) {
 		errno = -ENOMEM;
+#ifdef SPARCE_KEYMAP_FREE
 		goto error_keymap;
+#else
+		goto error_idev;
+#endif
 	}
 
 	if (likely(s_clevo.model->led_get &&
@@ -823,8 +827,10 @@ clevo_wmi_init(void)
 error_led_workqueue:
 	destroy_workqueue(s_clevo.led_workqueue);
 
+#ifdef SPARCE_KEYMAP_FREE
 error_keymap:
 	sparse_keymap_free(s_clevo.idev);
+#endif
 
 error_idev:
 	input_free_device(s_clevo.idev);
@@ -847,8 +853,10 @@ clevo_wmi_exit(void)
 	if (likely(s_clevo.led_workqueue))
 		destroy_workqueue(s_clevo.led_workqueue);
 
+#ifdef SPARCE_KEYMAP_FREE
 	if (likely(s_clevo.model && s_clevo.model->keymap))
 		sparse_keymap_free(s_clevo.idev);
+#endif
 
 	input_unregister_device(s_clevo.idev);
 	input_free_device(s_clevo.idev);
